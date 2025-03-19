@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include <GyverDBFile.h>
+#include <GTimer.h>
 #include <SettingsGyver.h>
 #include <LittleFS.h>
 #include <WiFiConnector.h>
@@ -40,11 +41,7 @@ GyverDBFile db(&LittleFS, "/data.db");
 SettingsGyver sett(PROJECT_NAME, &db);
 State state;
 
-unsigned long previous100Millis = 0;
-const long interval100 = 99; 
-
-unsigned long previous500Millis = 0;
-const long interval500 = 499;
+GTimerCb<millis> tmr100ms, tmr500ms;
 
 // ========== build ==========
 static void build(sets::Builder& b) {
@@ -130,6 +127,15 @@ void sett_loop() {
     sett.tick();
 }
 
+// ========== Обработчики таймеров ==========
+
+void tmr100() {
+    mcp2515.sendMessage(&canMsg[MessageIds::x036]);
+}
+
+void tmr500() {
+    mcp2515.sendMessage(&canMsg[MessageIds::x0F6]);
+}
 
 void setup() {
     Serial.begin(115200);
@@ -143,35 +149,22 @@ void setup() {
 
     sett_begin();
 
-    // из settings.h доступны db и ключи
     Serial.println(db[kk::wifi_ssid]);
 
 // ========== Начальные значения ==========    
-    canMsg[MessageIds::x036] = {0x036, 8, {0xE, 0, 0, 0, 0x92, 0, 0, 0}};
+    canMsg[MessageIds::x036] = {0x036, 8, {0xE, 0, 0, 0, 0x92, 0, 0, 0xA0}};
     canMsg[MessageIds::x0F6] = {0x0F6, 8, {0, 0, 0, 0, 0, 0, (__u8)((state.otdrTemp + 40) * 2), 0}};
+
+// ========== Инициализация таймеров ==========
+    tmr100ms.startInterval(100, tmr100);
+    tmr500ms.startInterval(500, tmr500);
 
 }
 
 void loop() {
     sett_loop();
 
-    unsigned long currentMillis = millis();
+    tmr100ms.tick();
+    tmr500ms.tick();
 
-    if (currentMillis - previous100Millis >= interval100) {
-        mcp2515.sendMessage(&canMsg[MessageIds::x036]);
-        Serial.print("Message sent: ");
-        Serial.print(canMsg[MessageIds::x036].data[4],HEX);
-        Serial.println();
-
-        previous100Millis = currentMillis;
-    }
-
-    if (currentMillis - previous500Millis >= interval500) {
-        mcp2515.sendMessage(&canMsg[MessageIds::x0F6]);
-        Serial.print("Message sent: ");
-        Serial.print(canMsg[MessageIds::x0F6].data[6],HEX);
-        Serial.println();
-
-        previous500Millis = currentMillis;
-    }
 }
