@@ -12,16 +12,22 @@
 #include <mcp2515.h>
 
 enum MessageIds {
-    x036, //
-    x0B6,
-    x0E6,
-    x0F6,
-    x128,
-    x1D0,
+    x036, // BSI Ignition, Dashboard lightning
+    x0B6, // Tachometer, Actual speed, Odometer from start, Fuel consumtion
+    x0E6, // Wheels rotation, voltage
+    x0F6, // Ignition, Coolant temperature, Odometer, External temperature, Reverse gear, Turn signals
+    x122, // Universal multiplexed panel (Multimedia control)
+    x128, // Dashboard lights
+    x1D0, // Climate control information
+    x21F, // Radio remote control under the steering wheel
+    x220, // Door status
+    x221, // Trip computer
+    x260, // ****, Language
+    x261, // Average speed, Fuel consumption
     Count
 };
 
-struct can_frame canMsg[Count];
+struct can_frame canMsg[MessageIds::Count];
 struct MCP2515 mcp2515(15);
 
 DB_KEYS(
@@ -59,7 +65,7 @@ static void build(sets::Builder& b) {
 
 
 // ========== Основной интерфейс ==========
-    if (b.beginGroup("Control")) {
+    if (b.beginGroup("Общие")) {
         sets::GuestAccess g(b);
 
         if (b.Switch("Запуск двигателя", &state.egnRnn)) {
@@ -71,9 +77,44 @@ static void build(sets::Builder& b) {
         if (b.Number("Наружная температура", &state.otdrTemp, -40, 85)) {
             // обработка изменения значения 
             // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
-
             canMsg[MessageIds::x0F6].data[6] = (state.otdrTemp + 40) * 2;
         }
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Освещение")) {
+        sets::GuestAccess g(b);
+
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Мультимедиа")) {
+        sets::GuestAccess g(b);
+
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Климат-контроль")) {
+        sets::GuestAccess g(b);
+
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Двери")) {
+        sets::GuestAccess g(b);
+
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Панель приборов")) {
+        sets::GuestAccess g(b);
+
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Освещение")) {
+        sets::GuestAccess g(b);
+
         b.endGroup();
     }
 
