@@ -10,12 +10,8 @@
 #include <SPI.h>
 #include <mcp2515.h>
 
-
-struct can_frame canMsg;
-struct MCP2515 mcp2515(15);
-
-enum class MesageIds {
-    x036,
+enum MessageIds {
+    x036, //
     x0B6,
     x0E6,
     x0F6,
@@ -23,6 +19,9 @@ enum class MesageIds {
     x1D0,
     Count
 };
+
+struct can_frame canMsg[Count];
+struct MCP2515 mcp2515(15);
 
 DB_KEYS(
     kk,
@@ -33,6 +32,7 @@ DB_KEYS(
 
 struct State {
     bool egnRnn = false;
+    __u8 otdrTemp = 0;
 };
 
 
@@ -40,9 +40,11 @@ GyverDBFile db(&LittleFS, "/data.db");
 SettingsGyver sett(PROJECT_NAME, &db);
 State state;
 
-unsigned long previousMillis = 0;
-const long interval = 99; 
+unsigned long previous100Millis = 0;
+const long interval100 = 99; 
 
+unsigned long previous500Millis = 0;
+const long interval500 = 499;
 
 // ========== build ==========
 static void build(sets::Builder& b) {
@@ -58,15 +60,28 @@ static void build(sets::Builder& b) {
         }
     }
 
+
+// ========== Основной интерфейс ==========
     if (b.beginGroup("Control")) {
         sets::GuestAccess g(b);
 
-        b.Switch("Запуск двигателя", &state.egnRnn);
+        if (b.Switch("Запуск двигателя", &state.egnRnn)) {
+            // обработка изменения значения
+            // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x01 : 0x00
+            canMsg[MessageIds::x036].data[4] = state.egnRnn ? 0x91 : 0x92;
+        }
 
-        if (b.Button("Перезагрузить")) {
-            ESP.restart();
+        if (b.Number("Наружная температура", &state.otdrTemp, -40, 85)) {
+            // обработка изменения значения 
+            // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
+
+            canMsg[MessageIds::x0F6].data[6] = (state.otdrTemp + 40) * 2;
         }
         b.endGroup();
+    }
+
+    if (b.Button("Перезагрузить")) {
+        ESP.restart();
     }
 }
 
@@ -131,17 +146,9 @@ void setup() {
     // из settings.h доступны db и ключи
     Serial.println(db[kk::wifi_ssid]);
 
-    canMsg.can_id = 0x036;
-    canMsg.can_dlc = 8;
-    canMsg.data[0] = 0x00;
-    canMsg.data[1] = 0x00;
-    canMsg.data[2] = 0x00;
-    canMsg.data[3] = 0x00;
-    canMsg.data[4] = 0x00;
-    canMsg.data[5] = 0x00;
-    canMsg.data[6] = 0x00;
-    canMsg.data[7] = 0x00;
-
+// ========== Начальные значения ==========    
+    canMsg[MessageIds::x036] = {0x036, 8, {0xE, 0, 0, 0, 0x92, 0, 0, 0}};
+    canMsg[MessageIds::x0F6] = {0x0F6, 8, {0, 0, 0, 0, 0, 0, (__u8)((state.otdrTemp + 40) * 2), 0}};
 
 }
 
@@ -150,14 +157,21 @@ void loop() {
 
     unsigned long currentMillis = millis();
 
-    if (currentMillis - previousMillis >= interval) {
-        canMsg.data[4] = state.egnRnn ? 0x01 : 0x00;
-
-        mcp2515.sendMessage(&canMsg);
+    if (currentMillis - previous100Millis >= interval100) {
+        mcp2515.sendMessage(&canMsg[MessageIds::x036]);
         Serial.print("Message sent: ");
-        Serial.print(canMsg.data[4],HEX);
+        Serial.print(canMsg[MessageIds::x036].data[4],HEX);
         Serial.println();
 
-        previousMillis = currentMillis;
+        previous100Millis = currentMillis;
+    }
+
+    if (currentMillis - previous500Millis >= interval500) {
+        mcp2515.sendMessage(&canMsg[MessageIds::x0F6]);
+        Serial.print("Message sent: ");
+        Serial.print(canMsg[MessageIds::x0F6].data[6],HEX);
+        Serial.println();
+
+        previous500Millis = currentMillis;
     }
 }
