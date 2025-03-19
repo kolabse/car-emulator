@@ -39,7 +39,9 @@ DB_KEYS(
 
 struct State {
     bool egnRnn = false;
-    __u8 otdrTemp = 0;
+    bool econMode = false;
+    bool parkBrake = false;
+    int8_t otdrTemp = 0;
 };
 
 
@@ -48,6 +50,11 @@ SettingsGyver sett(PROJECT_NAME, &db);
 State state;
 
 GTimerCb<millis> tmr100ms, tmr500ms;
+
+
+__u8 outdorTempToCan(int8_t temp) {
+    return (temp + 40) * 2;
+}
 
 // ========== build ==========
 static void build(sets::Builder& b) {
@@ -68,23 +75,77 @@ static void build(sets::Builder& b) {
     if (b.beginGroup("Общие")) {
         sets::GuestAccess g(b);
 
-        if (b.Switch("Запуск двигателя", &state.egnRnn)) {
+        if (b.Switch("Зажигание", &state.egnRnn)) {
             // обработка изменения значения
-            // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x01 : 0x00
+            // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x91 : 0x92
             canMsg[MessageIds::x036].data[4] = state.egnRnn ? 0x91 : 0x92;
+            canMsg[MessageIds::x0F6].data[0] = state.egnRnn ? 0x8E : 0x86;
         }
 
-        if (b.Number("Наружная температура", &state.otdrTemp, -40, 85)) {
-            // обработка изменения значения 
-            // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
-            canMsg[MessageIds::x0F6].data[6] = (state.otdrTemp + 40) * 2;
+        if (b.Switch("Экономичный режим", &state.econMode)) {
+            // обработка изменения значения
+            // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x80 : 0x00
+            canMsg[MessageIds::x036].data[2] = state.econMode ? 0x80 : 0x00;
         }
+        if (b.beginRow("Наружная температура")) {
+
+            if (b.Button("UP")) {
+                state.otdrTemp++;
+                if (state.otdrTemp > 85) state.otdrTemp = 85;
+                canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
+            }
+
+            if (b.Number("otdrT"_h, "", &state.otdrTemp, -40, 85)) {
+                // обработка изменения значения 
+                // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
+                canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
+            }
+
+            if (b.Button("DOWN")) {
+                state.otdrTemp--;
+                if (state.otdrTemp < -40) state.otdrTemp = -40;
+                canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
+            }
+
+
+            b.endRow();
+        }
+    
+
+        b.endGroup();
+    }
+
+    if (b.beginGroup("Панель приборов")) {
+        sets::GuestAccess g(b);
+        // Температура охлаждающей жидкости
+        // Обороты двигателя
+        // Текущая скорость
+        // Пробег с момента запуска
+        // Расход топлива
+        // Ремень безопасности водителя
+        // Стояночный тормоз
+        // Открыта одна из дверей
+        // Габариты
+        // Ближний свет
+        // Дальний свет
+        // Передние противотуманные фары
+        // Задние противотуманные фары
+        // Поворотник правый
+        // Поворотник левый
+        // Низкий уровень топлива
+        // Ремни безопасности, мигающий сигнал
+        // Ремни безопасности
+        // Яркость подсветки приборной панели
+
         b.endGroup();
     }
 
     if (b.beginGroup("Освещение")) {
         sets::GuestAccess g(b);
-
+        // Подсветка приборной панели
+        // Яркость подсветки приборной панели
+        // Задний ход
+        // Поворотники
         b.endGroup();
     }
 
@@ -106,12 +167,6 @@ static void build(sets::Builder& b) {
         b.endGroup();
     }
 
-    if (b.beginGroup("Панель приборов")) {
-        sets::GuestAccess g(b);
-
-        b.endGroup();
-    }
-
     if (b.beginGroup("Освещение")) {
         sets::GuestAccess g(b);
 
@@ -124,7 +179,8 @@ static void build(sets::Builder& b) {
 }
 
 // ========== update ==========
-static void update(sets::Updater& u) {
+static void update(sets::Updater& upd) {
+    upd.update("otdrT"_h, state.otdrTemp);
 }
 
 // ========== begin ==========
@@ -193,8 +249,8 @@ void setup() {
     Serial.println(db[kk::wifi_ssid]);
 
 // ========== Начальные значения ==========    
-    canMsg[MessageIds::x036] = {0x036, 8, {0xE, 0, 0, 0, 0x92, 0, 0, 0xA0}};
-    canMsg[MessageIds::x0F6] = {0x0F6, 8, {0, 0, 0, 0, 0, 0, (__u8)((state.otdrTemp + 40) * 2), 0}};
+    canMsg[MessageIds::x036] = {0x036, 8, {0xE, 0, 0, 0x2F, 0x92, 0, 0, 0xA0}};
+    canMsg[MessageIds::x0F6] = {0x0F6, 8, {0x86, 0, 0, 0, 0, 0, (__u8)((state.otdrTemp + 40) * 2), 0}};
 
 // ========== Инициализация таймеров ==========
     tmr100ms.startInterval(100, tmr100);
