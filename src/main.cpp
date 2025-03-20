@@ -23,7 +23,6 @@ enum MessageIds {
     x220, // Door status
     x221, // Trip computer
     x260, // ****, Language
-    x261, // Average speed, Fuel consumption
     Count
 };
 
@@ -42,6 +41,10 @@ struct State {
     bool econMode = false;
     bool parkBrake = false;
     int8_t otdrTemp = 0;
+    int8_t clntTemp = 0;
+    int8_t speed = 0;
+    int16_t rpm = 0;
+    
 };
 
 
@@ -49,7 +52,7 @@ GyverDBFile db(&LittleFS, "/data.db");
 SettingsGyver sett(PROJECT_NAME, &db);
 State state;
 
-GTimerCb<millis> tmr100ms, tmr500ms;
+GTimerCb<millis> tmr50ms, tmr100ms, tmr200ms, tmr500ms, tmr1000ms;
 
 
 __u8 outdorTempToCan(int8_t temp) {
@@ -76,14 +79,12 @@ static void build(sets::Builder& b) {
         sets::GuestAccess g(b);
 
         if (b.Switch("Зажигание", &state.egnRnn)) {
-            // обработка изменения значения
             // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x91 : 0x92
             canMsg[MessageIds::x036].data[4] = state.egnRnn ? 0x91 : 0x92;
             canMsg[MessageIds::x0F6].data[0] = state.egnRnn ? 0x8E : 0x86;
         }
 
         if (b.Switch("Экономичный режим", &state.econMode)) {
-            // обработка изменения значения
             // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x80 : 0x00
             canMsg[MessageIds::x036].data[2] = state.econMode ? 0x80 : 0x00;
         }
@@ -95,8 +96,7 @@ static void build(sets::Builder& b) {
                 canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
             }
 
-            if (b.Number("otdrT"_h, "", &state.otdrTemp, -40, 85)) {
-                // обработка изменения значения 
+            if (b.Number("otdrT"_h, "t°", &state.otdrTemp, -40, 85)) {
                 // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
                 canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
             }
@@ -106,7 +106,6 @@ static void build(sets::Builder& b) {
                 if (state.otdrTemp < -40) state.otdrTemp = -40;
                 canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
             }
-
 
             b.endRow();
         }
@@ -118,7 +117,16 @@ static void build(sets::Builder& b) {
     if (b.beginGroup("Панель приборов")) {
         sets::GuestAccess g(b);
         // Температура охлаждающей жидкости
+        if (b.Slider("clntT"_h, "Температура двигателя", -39, 120, 1, " °C", &state.clntTemp)) {
+            // Формула Значение параметра в CAN-сообщении = Значение параметра + 39
+            canMsg[MessageIds::x0F6].data[1] = state.clntTemp + 39;
+        }
         // Обороты двигателя
+        if (b.Slider("rpm"_h, "Обороты двигателя", 0, 8000, 100, " об/мин", &state.rpm)) {
+            canMsg[MessageIds::x0B6].data[0] = ((state.rpm << 3) & 0xFF00) >> 8;
+            canMsg[MessageIds::x0B6].data[1] = (state.rpm << 3) & 0x00FF;
+            
+        }
         // Текущая скорость
         // Пробег с момента запуска
         // Расход топлива
@@ -226,12 +234,30 @@ void sett_loop() {
 
 // ========== Обработчики таймеров ==========
 
+void tmr50() {
+    mcp2515.sendMessage(&canMsg[MessageIds::x0B6]);
+}
+
 void tmr100() {
     mcp2515.sendMessage(&canMsg[MessageIds::x036]);
+    mcp2515.sendMessage(&canMsg[MessageIds::x21F]);
+}
+
+void tmr200() {
+    mcp2515.sendMessage(&canMsg[MessageIds::x0E6]);
+//    mcp2515.sendMessage(&canMsg[MessageIds::x122]);
+    mcp2515.sendMessage(&canMsg[MessageIds::x128]);
 }
 
 void tmr500() {
     mcp2515.sendMessage(&canMsg[MessageIds::x0F6]);
+//    mcp2515.sendMessage(&canMsg[MessageIds::x1D0]);
+    mcp2515.sendMessage(&canMsg[MessageIds::x220]);
+    mcp2515.sendMessage(&canMsg[MessageIds::x260]);
+}
+
+void tmr1000() {
+    mcp2515.sendMessage(&canMsg[MessageIds::x221]);
 }
 
 void setup() {
@@ -248,20 +274,37 @@ void setup() {
 
     Serial.println(db[kk::wifi_ssid]);
 
-// ========== Начальные значения ==========    
-    canMsg[MessageIds::x036] = {0x036, 8, {0xE, 0, 0, 0x2F, 0x92, 0, 0, 0xA0}};
-    canMsg[MessageIds::x0F6] = {0x0F6, 8, {0x86, 0, 0, 0, 0, 0, (__u8)((state.otdrTemp + 40) * 2), 0}};
+// ========== Начальные значения ==========
+    __u8 _0F6_1 = (__u8)(state.clntTemp + 39);
+    __u8 _0F6_6 = (__u8)((state.otdrTemp + 40) * 2);
+
+    canMsg[MessageIds::x036] = {0x036, 8, {0x0E, 0x00, 0x00, 0x2F, 0x92, 0x00, 0x00, 0xA0}};
+    canMsg[MessageIds::x0B6] = {0x0B6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x0E6] = {0x0E6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x0F6] = {0x0F6, 8, {0x86, _0F6_1, 0x00, 0x00, 0x00, 0x00, _0F6_6, 0x00}};
+    canMsg[MessageIds::x122] = {0x122, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x128] = {0x128, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x1D0] = {0x1D0, 7, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x21F] = {0x21F, 3, {0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x220] = {0x220, 2, {0x00, 0x00}};
+    canMsg[MessageIds::x221] = {0x221, 7, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x260] = {0x260, 7, {0xB8, 0x34, 0x8F, 0x30, 0xD5, 0x41, 0x00}};
+
 
 // ========== Инициализация таймеров ==========
-    tmr100ms.startInterval(100, tmr100);
-    tmr500ms.startInterval(500, tmr500);
-
+    tmr50ms.startInterval(49, tmr50);
+    tmr100ms.startInterval(99, tmr100);
+    tmr200ms.startInterval(199, tmr200);
+    tmr500ms.startInterval(499, tmr500);
+    tmr1000ms.startInterval(999, tmr1000);
 }
 
 void loop() {
     sett_loop();
 
+    tmr50ms.tick();
     tmr100ms.tick();
+    tmr200ms.tick();
     tmr500ms.tick();
-
+    tmr1000ms.tick();
 }
