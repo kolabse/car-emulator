@@ -45,6 +45,14 @@ struct Emulator {
     bool doors = false;
 };
 
+struct Doors {
+    bool frontLeft = false;
+    bool frontRight = false;
+    bool rearLeft = false;
+    bool rearRight = false;
+    bool trunk = false;
+};
+
 struct State {
     bool egnRnn = false;        // Зажигание
     bool econMode = false;      // Экономичный режим
@@ -54,7 +62,7 @@ struct State {
     int8_t speed = 0;           // Текущая скорость
     int16_t rpm = 0;            // Обороты двигателя
     uint32_t mileage = 0;       // Пробег с момента запуска
-    
+    Doors doors;
 };
 
 
@@ -83,7 +91,7 @@ static void build(sets::Builder& b) {
 // ========== Основной интерфейс ==========
     if (b.beginGroup("Общие")) {
         sets::GuestAccess g(b);
-        if (b.Switch("Включить", &emulator.common)) {
+        if (b.Switch("Отправка", &emulator.common)) {
             // Включение/выключение всех параметров
          
         }
@@ -108,83 +116,117 @@ static void build(sets::Builder& b) {
         b.endGroup();
     }
 
-    if (b.beginGroup("Панель приборов")) {
+    if (b.beginGroup("Устройства")) { 
         sets::GuestAccess g(b);
-        if (b.Switch("Включить", &emulator.dashboard)) {
-            // Включение/выключение всех параметров
+
+        {
+            sets::Menu m(b, "Панель приборов");
+            if (b.beginGroup("Панель приборов")) {
+                if (b.Switch("Отправка", &emulator.dashboard)) {
+                    // Включение/выключение всех параметров
+                }
+        
+                // Температура охлаждающей жидкости
+                if (b.Slider("clntT"_h, "Температура двигателя", -39, 120, 1, " °C", &state.clntTemp)) {
+                    // Формула Значение параметра в CAN-сообщении = Значение параметра + 39
+                    canMsg[MessageIds::x0F6].data[1] = state.clntTemp + 39;
+                }
+                // Обороты двигателя
+                if (b.Slider("rpm"_h, "Обороты двигателя", 0, 8000, 100, " об/мин", &state.rpm)) {
+                    canMsg[MessageIds::x0B6].data[0] = ((state.rpm << 3) & 0xFF00) >> 8;
+                    canMsg[MessageIds::x0B6].data[1] = (state.rpm << 3) & 0x00FF;
+                    
+                }
+                // Текущая скорость
+                // Пробег с момента запуска
+                // Расход топлива
+                // Ремень безопасности водителя
+                // Стояночный тормоз
+                // Открыта одна из дверей
+                // Габариты
+                // Ближний свет
+                // Дальний свет
+                // Передние противотуманные фары
+                // Задние противотуманные фары
+                // Поворотник правый
+                // Поворотник левый
+                // Низкий уровень топлива
+                // Ремни безопасности, мигающий сигнал
+                // Ремни безопасности
+                // Яркость подсветки приборной панели
+        
+                b.endGroup();
+            }
+
         }
 
-        // Температура охлаждающей жидкости
-        if (b.Slider("clntT"_h, "Температура двигателя", -39, 120, 1, " °C", &state.clntTemp)) {
-            // Формула Значение параметра в CAN-сообщении = Значение параметра + 39
-            canMsg[MessageIds::x0F6].data[1] = state.clntTemp + 39;
+        {
+            sets::Menu m(b, "Освещение");
+            if (b.beginGroup("Освещение")) {
+                if (b.Switch("Отправка", &emulator.lighting)) {
+                    // Включение/выключение всех параметров
+                }
+                // Подсветка приборной панели
+                // Яркость подсветки приборной панели
+                // Задний ход
+                // Поворотники
+                b.endGroup();
+            }
         }
-        // Обороты двигателя
-        if (b.Slider("rpm"_h, "Обороты двигателя", 0, 8000, 100, " об/мин", &state.rpm)) {
-            canMsg[MessageIds::x0B6].data[0] = ((state.rpm << 3) & 0xFF00) >> 8;
-            canMsg[MessageIds::x0B6].data[1] = (state.rpm << 3) & 0x00FF;
-            
-        }
-        // Текущая скорость
-        // Пробег с момента запуска
-        // Расход топлива
-        // Ремень безопасности водителя
-        // Стояночный тормоз
-        // Открыта одна из дверей
-        // Габариты
-        // Ближний свет
-        // Дальний свет
-        // Передние противотуманные фары
-        // Задние противотуманные фары
-        // Поворотник правый
-        // Поворотник левый
-        // Низкий уровень топлива
-        // Ремни безопасности, мигающий сигнал
-        // Ремни безопасности
-        // Яркость подсветки приборной панели
 
+        {
+            sets::Menu m(b, "Мультимедиа");
+            if (b.beginGroup("Мультимедиа")) {
+                if (b.Switch("Отправка", &emulator.multimedia)) {
+                    // Включение/выключение всех параметров
+                }
+        
+                b.endGroup();
+            }
+        }
+
+        {
+            sets::Menu m(b, "Климат-контроль");
+            if (b.beginGroup("Климат-контроль")) {
+                if (b.Switch("Отправка", &emulator.climate)) {
+                    // Включение/выключение всех параметров
+                }
+
+                b.endGroup();
+            }
+        }
+
+        {
+            sets::Menu m(b, "Двери"); 
+            if (b.beginGroup("Двери")) {
+                if (b.Switch("Отправка", &emulator.doors)) {
+                    // Включение/выключение всех параметров
+                }
+                // Передняя левая дверь
+                if(b.Switch("Передняя левая дверь", &state.doors.frontLeft)){
+                    bitWrite(canMsg[MessageIds::x220].data[0], 7, state.doors.frontLeft); ;
+                }
+                // Передняя правая дверь
+                if(b.Switch("Передняя правая дверь", &state.doors.frontRight)){
+                    bitWrite(canMsg[MessageIds::x220].data[0], 6, state.doors.frontRight); ;
+                }
+                // Задняя левая дверь
+                if(b.Switch("Задняя левая дверь", &state.doors.rearLeft)){
+                    bitWrite(canMsg[MessageIds::x220].data[0], 5, state.doors.rearLeft); ;
+                }
+                // Задняя правая дверь
+                if(b.Switch("Задняя правая дверь", &state.doors.rearRight)){
+                    bitWrite(canMsg[MessageIds::x220].data[0], 4, state.doors.rearRight); ;
+                }
+                // Багажник
+                if(b.Switch("Багажник", &state.doors.trunk)){
+                    bitWrite(canMsg[MessageIds::x220].data[0], 3, state.doors.trunk); ;
+                }
+                b.endGroup();
+            }
+        }
         b.endGroup();
     }
-
-    if (b.beginGroup("Освещение")) {
-        sets::GuestAccess g(b);
-        if (b.Switch("Включить", &emulator.lighting)) {
-            // Включение/выключение всех параметров
-        }
-        // Подсветка приборной панели
-        // Яркость подсветки приборной панели
-        // Задний ход
-        // Поворотники
-        b.endGroup();
-    }
-
-    if (b.beginGroup("Мультимедиа")) {
-        sets::GuestAccess g(b);
-        if (b.Switch("Включить", &emulator.multimedia)) {
-            // Включение/выключение всех параметров
-        }
-
-        b.endGroup();
-    }
-
-    if (b.beginGroup("Климат-контроль")) {
-        sets::GuestAccess g(b);
-        if (b.Switch("Включить", &emulator.climate)) {
-            // Включение/выключение всех параметров
-        }
-
-        b.endGroup();
-    }
-
-    if (b.beginGroup("Двери")) {
-        sets::GuestAccess g(b);
-        if (b.Switch("Включить", &emulator.doors)) {
-            // Включение/выключение всех параметров
-        }
-
-        b.endGroup();
-    }
-
     if (b.Button("Перезагрузить")) {
         ESP.restart();
     }
