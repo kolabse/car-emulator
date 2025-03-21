@@ -36,14 +36,24 @@ DB_KEYS(
     close_ap
 );
 
+struct Emulator {
+    bool common = false;
+    bool dashboard = false;
+    bool climate = false;
+    bool lighting = false;
+    bool multimedia = false;
+    bool doors = false;
+};
+
 struct State {
-    bool egnRnn = false;
-    bool econMode = false;
-    bool parkBrake = false;
-    int8_t otdrTemp = 0;
-    int8_t clntTemp = 0;
-    int8_t speed = 0;
-    int16_t rpm = 0;
+    bool egnRnn = false;        // Зажигание
+    bool econMode = false;      // Экономичный режим
+    bool parkBrake = false;     // Стояночный тормоз
+    int8_t otdrTemp = 0;        // Наружная температура
+    int8_t clntTemp = 0;        // Температура охлаждающей жидкости
+    int8_t speed = 0;           // Текущая скорость
+    int16_t rpm = 0;            // Обороты двигателя
+    uint32_t mileage = 0;       // Пробег с момента запуска
     
 };
 
@@ -51,13 +61,9 @@ struct State {
 GyverDBFile db(&LittleFS, "/data.db");
 SettingsGyver sett(PROJECT_NAME, &db);
 State state;
+Emulator emulator;
 
 GTimerCb<millis> tmr50ms, tmr100ms, tmr200ms, tmr500ms, tmr1000ms;
-
-
-__u8 outdorTempToCan(int8_t temp) {
-    return (temp + 40) * 2;
-}
 
 // ========== build ==========
 static void build(sets::Builder& b) {
@@ -77,6 +83,10 @@ static void build(sets::Builder& b) {
 // ========== Основной интерфейс ==========
     if (b.beginGroup("Общие")) {
         sets::GuestAccess g(b);
+        if (b.Switch("Включить", &emulator.common)) {
+            // Включение/выключение всех параметров
+         
+        }
 
         if (b.Switch("Зажигание", &state.egnRnn)) {
             // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x91 : 0x92
@@ -88,26 +98,10 @@ static void build(sets::Builder& b) {
             // Формула Значение параметра в CAN-сообщении = Значение параметра ? 0x80 : 0x00
             canMsg[MessageIds::x036].data[2] = state.econMode ? 0x80 : 0x00;
         }
-        if (b.beginRow("Наружная температура")) {
 
-            if (b.Button("UP")) {
-                state.otdrTemp++;
-                if (state.otdrTemp > 85) state.otdrTemp = 85;
-                canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
-            }
-
-            if (b.Number("otdrT"_h, "t°", &state.otdrTemp, -40, 85)) {
-                // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
-                canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
-            }
-
-            if (b.Button("DOWN")) {
-                state.otdrTemp--;
-                if (state.otdrTemp < -40) state.otdrTemp = -40;
-                canMsg[MessageIds::x0F6].data[6] = outdorTempToCan(state.otdrTemp);
-            }
-
-            b.endRow();
+        if (b.Slider("otdrT"_h, "Наружная температура", -40, 85, 1, " °C", &state.otdrTemp)) {
+            // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
+            canMsg[MessageIds::x0F6].data[6] = (state.otdrTemp + 40u) * 2u;
         }
     
 
@@ -116,6 +110,10 @@ static void build(sets::Builder& b) {
 
     if (b.beginGroup("Панель приборов")) {
         sets::GuestAccess g(b);
+        if (b.Switch("Включить", &emulator.dashboard)) {
+            // Включение/выключение всех параметров
+        }
+
         // Температура охлаждающей жидкости
         if (b.Slider("clntT"_h, "Температура двигателя", -39, 120, 1, " °C", &state.clntTemp)) {
             // Формула Значение параметра в CAN-сообщении = Значение параметра + 39
@@ -150,6 +148,9 @@ static void build(sets::Builder& b) {
 
     if (b.beginGroup("Освещение")) {
         sets::GuestAccess g(b);
+        if (b.Switch("Включить", &emulator.lighting)) {
+            // Включение/выключение всех параметров
+        }
         // Подсветка приборной панели
         // Яркость подсветки приборной панели
         // Задний ход
@@ -159,24 +160,27 @@ static void build(sets::Builder& b) {
 
     if (b.beginGroup("Мультимедиа")) {
         sets::GuestAccess g(b);
+        if (b.Switch("Включить", &emulator.multimedia)) {
+            // Включение/выключение всех параметров
+        }
 
         b.endGroup();
     }
 
     if (b.beginGroup("Климат-контроль")) {
         sets::GuestAccess g(b);
+        if (b.Switch("Включить", &emulator.climate)) {
+            // Включение/выключение всех параметров
+        }
 
         b.endGroup();
     }
 
     if (b.beginGroup("Двери")) {
         sets::GuestAccess g(b);
-
-        b.endGroup();
-    }
-
-    if (b.beginGroup("Освещение")) {
-        sets::GuestAccess g(b);
+        if (b.Switch("Включить", &emulator.doors)) {
+            // Включение/выключение всех параметров
+        }
 
         b.endGroup();
     }
@@ -188,7 +192,7 @@ static void build(sets::Builder& b) {
 
 // ========== update ==========
 static void update(sets::Updater& upd) {
-    upd.update("otdrT"_h, state.otdrTemp);
+    // upd.update("otdrT"_h, state.otdrTemp);
 }
 
 // ========== begin ==========
@@ -235,29 +239,51 @@ void sett_loop() {
 // ========== Обработчики таймеров ==========
 
 void tmr50() {
-    mcp2515.sendMessage(&canMsg[MessageIds::x0B6]);
+    if (emulator.dashboard){
+        mcp2515.sendMessage(&canMsg[MessageIds::x0B6]);
+    } 
 }
 
 void tmr100() {
-    mcp2515.sendMessage(&canMsg[MessageIds::x036]);
-    mcp2515.sendMessage(&canMsg[MessageIds::x21F]);
+    if (emulator.common){
+        mcp2515.sendMessage(&canMsg[MessageIds::x036]);
+    }
 }
 
 void tmr200() {
-    mcp2515.sendMessage(&canMsg[MessageIds::x0E6]);
-//    mcp2515.sendMessage(&canMsg[MessageIds::x122]);
-    mcp2515.sendMessage(&canMsg[MessageIds::x128]);
+    if (emulator.common){
+        mcp2515.sendMessage(&canMsg[MessageIds::x0E6]);
+    }
+    if (emulator.multimedia){
+        mcp2515.sendMessage(&canMsg[MessageIds::x122]);
+    }
+    if(emulator.lighting){
+        mcp2515.sendMessage(&canMsg[MessageIds::x128]);
+    }
 }
 
 void tmr500() {
-    mcp2515.sendMessage(&canMsg[MessageIds::x0F6]);
-//    mcp2515.sendMessage(&canMsg[MessageIds::x1D0]);
-    mcp2515.sendMessage(&canMsg[MessageIds::x220]);
-    mcp2515.sendMessage(&canMsg[MessageIds::x260]);
+    if (emulator.common || emulator.dashboard || emulator.lighting){ 
+        mcp2515.sendMessage(&canMsg[MessageIds::x0F6]);
+    }
+    
+    if (emulator.climate){
+        mcp2515.sendMessage(&canMsg[MessageIds::x1D0]);
+    }
+    if (emulator.doors){
+        mcp2515.sendMessage(&canMsg[MessageIds::x220]);
+    }
+    if (emulator.multimedia){
+        mcp2515.sendMessage(&canMsg[MessageIds::x260]);
+    }
+    
 }
 
 void tmr1000() {
-    mcp2515.sendMessage(&canMsg[MessageIds::x221]);
+    if (emulator.dashboard){
+        mcp2515.sendMessage(&canMsg[MessageIds::x221]);
+    }
+    
 }
 
 void setup() {
@@ -280,10 +306,10 @@ void setup() {
 
     canMsg[MessageIds::x036] = {0x036, 8, {0x0E, 0x00, 0x00, 0x2F, 0x92, 0x00, 0x00, 0xA0}};
     canMsg[MessageIds::x0B6] = {0x0B6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
-    canMsg[MessageIds::x0E6] = {0x0E6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x0E6] = {0x0E6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x45}};
     canMsg[MessageIds::x0F6] = {0x0F6, 8, {0x86, _0F6_1, 0x00, 0x00, 0x00, 0x00, _0F6_6, 0x00}};
     canMsg[MessageIds::x122] = {0x122, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
-    canMsg[MessageIds::x128] = {0x128, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    canMsg[MessageIds::x128] = {0x128, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F}};
     canMsg[MessageIds::x1D0] = {0x1D0, 7, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
     canMsg[MessageIds::x21F] = {0x21F, 3, {0x00, 0x00, 0x00}};
     canMsg[MessageIds::x220] = {0x220, 2, {0x00, 0x00}};
@@ -292,11 +318,11 @@ void setup() {
 
 
 // ========== Инициализация таймеров ==========
-    tmr50ms.startInterval(49, tmr50);
-    tmr100ms.startInterval(99, tmr100);
-    tmr200ms.startInterval(199, tmr200);
-    tmr500ms.startInterval(499, tmr500);
-    tmr1000ms.startInterval(999, tmr1000);
+    tmr50ms.startInterval(50, tmr50);
+    tmr100ms.startInterval(100, tmr100);
+    tmr200ms.startInterval(200, tmr200);
+    tmr500ms.startInterval(500, tmr500);
+    tmr1000ms.startInterval(1000, tmr1000);
 }
 
 void loop() {
