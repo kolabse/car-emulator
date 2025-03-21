@@ -57,11 +57,13 @@ struct State {
     bool egnRnn = false;        // Зажигание
     bool econMode = false;      // Экономичный режим
     bool parkBrake = false;     // Стояночный тормоз
+    uint8_t brightness = 0;     // Яркость подсветки приборной панели
     int8_t otdrTemp = 0;        // Наружная температура
     int8_t clntTemp = 0;        // Температура охлаждающей жидкости
     int8_t speed = 0;           // Текущая скорость
     int16_t rpm = 0;            // Обороты двигателя
     uint32_t mileage = 0;       // Пробег с момента запуска
+    float voltage = 0;          // Напряжение
     Doors doors;
 };
 
@@ -93,7 +95,6 @@ static void build(sets::Builder& b) {
         sets::GuestAccess g(b);
         if (b.Switch("Отправка", &emulator.common)) {
             // Включение/выключение всех параметров
-         
         }
 
         if (b.Switch("Зажигание", &state.egnRnn)) {
@@ -110,6 +111,11 @@ static void build(sets::Builder& b) {
         if (b.Slider("otdrT"_h, "Наружная температура", -40, 85, 1, " °C", &state.otdrTemp)) {
             // Формула Значение параметра в CAN-сообщении = (Значение параметра + 40) * 2
             canMsg[MessageIds::x0F6].data[6] = (state.otdrTemp + 40u) * 2u;
+        }
+
+        if (b.Slider("volts"_h, "Напряжение", 10, 15, 0.1, " В", &state.voltage)) {
+            // Формула Значение параметра в CAN-сообщении = Значение параметра * 20 - 144
+            canMsg[MessageIds::x0E6].data[6] = state.voltage * 20 - 144;
         }
     
 
@@ -151,9 +157,18 @@ static void build(sets::Builder& b) {
                 // Поворотник правый
                 // Поворотник левый
                 // Низкий уровень топлива
+                if (b.ButtonHold()) {
+                    // Отправка сообщения
+                    bitWrite(canMsg[MessageIds::x128].data[5], 7, b.build.pressed());
+                }
+                // Передние стеклоочистители
                 // Ремни безопасности, мигающий сигнал
                 // Ремни безопасности
                 // Яркость подсветки приборной панели
+                if (b.Slider("brightness"_h, "Яркость подсветки приборной панели", 0, 15, 1, "", &state.brightness)) {
+                    canMsg[MessageIds::x036].data[3] = (canMsg[MessageIds::x036].data[3] & 0xF0) | state.brightness;
+                    canMsg[MessageIds::x128].data[7] = (canMsg[MessageIds::x128].data[7] & 0xF0) | state.brightness;
+                }
         
                 b.endGroup();
             }
@@ -287,7 +302,7 @@ void tmr50() {
 }
 
 void tmr100() {
-    if (emulator.common){
+    if (emulator.common || emulator.dashboard){
         mcp2515.sendMessage(&canMsg[MessageIds::x036]);
     }
 }
@@ -299,7 +314,7 @@ void tmr200() {
     if (emulator.multimedia){
         mcp2515.sendMessage(&canMsg[MessageIds::x122]);
     }
-    if(emulator.lighting){
+    if(emulator.dashboard || emulator.lighting){
         mcp2515.sendMessage(&canMsg[MessageIds::x128]);
     }
 }
@@ -346,12 +361,12 @@ void setup() {
     __u8 _0F6_1 = (__u8)(state.clntTemp + 39);
     __u8 _0F6_6 = (__u8)((state.otdrTemp + 40) * 2);
 
-    canMsg[MessageIds::x036] = {0x036, 8, {0x0E, 0x00, 0x00, 0x2F, 0x92, 0x00, 0x00, 0xA0}};
+    canMsg[MessageIds::x036] = {0x036, 8, {0x0E, 0x00, 0x00, 0x30, 0x92, 0x00, 0x00, 0xA0}};
     canMsg[MessageIds::x0B6] = {0x0B6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
     canMsg[MessageIds::x0E6] = {0x0E6, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x45}};
     canMsg[MessageIds::x0F6] = {0x0F6, 8, {0x86, _0F6_1, 0x00, 0x00, 0x00, 0x00, _0F6_6, 0x00}};
     canMsg[MessageIds::x122] = {0x122, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
-    canMsg[MessageIds::x128] = {0x128, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F}};
+    canMsg[MessageIds::x128] = {0x128, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
     canMsg[MessageIds::x1D0] = {0x1D0, 7, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
     canMsg[MessageIds::x21F] = {0x21F, 3, {0x00, 0x00, 0x00}};
     canMsg[MessageIds::x220] = {0x220, 2, {0x00, 0x00}};
